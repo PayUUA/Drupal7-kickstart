@@ -1,0 +1,832 @@
+diff --git a/commerce_payu/commerce_payu.module b/commerce_payu/commerce_payu.module
+old mode 100755
+new mode 100644
+index e8debda..89c34b3
+--- a/commerce_payu/commerce_payu.module
++++ b/commerce_payu/commerce_payu.module
+@@ -2,8 +2,7 @@
+ 
+ module_load_include('inc', 'commerce_payu', 'includes/commerce_payu.admin');
+ 
+-include_once drupal_get_path('module', 'commerce_payu')."/includes/class.payu.php";
+-
++include_once drupal_get_path('module', 'commerce_payu') . "/includes/class.payu.php";
+ 
+ 
+ function commerce_payu_commerce_payment_method_info() {
+@@ -16,19 +15,19 @@ function commerce_payu_commerce_payment_method_info() {
+     'description' => t('Integrates PayU Merchant'),
+     'terminal' => FALSE,
+     'offsite' => TRUE,
++    'offsite_autoredirect' => TRUE,
+     'active' => TRUE,
+   );
+   return $payment_methods;
+ }
+ 
+ 
+-
+ function commerce_payu_menu() {
+   $items['payu/result'] = array(
+     'title' => 'Результат оплаты через PayU',
+     'page callback' => 'commerce_payu_result',
+     #'page arguments' => array(2, 3),
+-    'access callback' => TRUE,  
++    'access callback' => TRUE,
+     'type' => MENU_CALLBACK,
+   );
+   return $items;
+@@ -37,213 +36,252 @@ function commerce_payu_menu() {
+ 
+ # after check payment system
+ function commerce_payu_submit_form($payment_method, $pane_values, $checkout_pane, $order) {
+-  $form = array();  
+-  $text = theme('image', array('path' => drupal_get_path('module', 'commerce_payu') . '/payu.gif', 'alt' => t('PayU'), 'title' => t('PayU'), 'attributes' => array('class' => 'wm-logo')));   
++  $form = array();
++  $text = theme('image', array(
++    'path' => drupal_get_path('module', 'commerce_payu') . '/payu.gif',
++    'alt' => t('PayU'),
++    'title' => t('PayU'),
++    'attributes' => array('class' => 'wm-logo')
++  ));
+   $text .= '<div class="payu-desc">' . t('PayU - Это мультифункциональный способ оплаты.') . '</div>';
+-  $form['print_receipt'] = array('#markup' => $text);  
++  $form['print_receipt'] = array('#markup' => $text);
+   return $form;
+ }
+ 
+ 
+-
+-
+-function getBillDelivery( $order )
+-{
++function getBillDelivery($order) {
+   $wrapper = entity_metadata_wrapper('commerce_order', $order);
+-  $billing_address = $wrapper->commerce_customer_billing->commerce_customer_address->value();
+-  $shipping_address = $wrapper->commerce_customer_shipping->commerce_customer_address->value();
+-  $name_parts = explode(' ', $shipping_address['name_line']);
+-      $shipping_address['first_name'] = array_shift($name_parts);
+-      $shipping_address['last_name'] = implode(' ', $name_parts);
+-  $name_parts = explode(' ', $billing_address['name_line']);
++  $result = array();
++  if (module_exists('commerce_customer')) {
++    if ($wrapper->commerce_customer_billing->__isset('commerce_customer_address')) {
++      $billing_address = $wrapper->commerce_customer_billing->commerce_customer_address->value();
++      $name_parts = explode(' ', $billing_address['name_line']);
+       $billing_address['first_name'] = array_shift($name_parts);
+       $billing_address['last_name'] = implode(' ', $name_parts);
+-
+-
+- return array(
+-    "BILL_FNAME" => $billing_address['first_name'],
+-    "BILL_LNAME" => $billing_address['last_name'],
+-    "BILL_EMAIL" => $order->mail,
+-    "BILL_PHONE" => "",
+-    "BILL_ADDRESS" => $billing_address['thoroughfare'],
+-    "BILL_ADDRESS2" => $billing_address['premise'],
+-    "BILL_ZIPCODE" => $billing_address['postal_code'],
+-    "BILL_CITY" => $billing_address['locality'],
+-    "BILL_STATE" => $billing_address['administrative_area'],
+-    "BILL_COUNTRYCODE" => $billing_address['country'],
+-    "DELIVERY_FNAME" => $shipping_address['first_name'],
+-    "DELIVERY_LNAME" => $shipping_address['last_name'],
+-    "DELIVERY_EMAIL" => $order->mail,
+-    "DELIVERY_PHONE" => "",
+-    "DELIVERY_ADDRESS" => $shipping_address['thoroughfare'], 
+-    "DELIVERY_ADDRESS2" => $shipping_address['premise'],
+-    "DELIVERY_ZIPCODE" => $shipping_address['postal_code'],
+-    "DELIVERY_CITY" => $shipping_address['locality'],
+-    "DELIVERY_STATE" => $shipping_address['administrative_area'],
+-    "DELIVERY_COUNTRYCODE" => $shipping_address['country'],
+-    );
++      $result += array(
++        "BILL_FNAME" => (isset($billing_address['first_name'])) ? $billing_address['first_name']: '',
++        "BILL_LNAME" => (isset($billing_address['last_name'])) ? $billing_address['last_name']: '',
++        "BILL_EMAIL" => $order->mail,
++        "BILL_PHONE" => '',
++        "BILL_ADDRESS" => (isset($billing_address['thoroughfare'])) ? $billing_address['thoroughfare']: '',
++        "BILL_ADDRESS2" => (isset($billing_address['premise'])) ? $billing_address['premise']: '',
++        "BILL_ZIPCODE" => (isset($billing_address['postal_code'])) ? $billing_address['postal_code']: '',
++        "BILL_CITY" => (isset($billing_address['locality'])) ? $billing_address['locality']: '',
++        "BILL_STATE" => (isset($billing_address['administrative_area'])) ? $billing_address['administrative_area']: '',
++        "BILL_COUNTRYCODE" => (isset($billing_address['country'])) ? $billing_address['country']: '',
++      );
++      if (module_exists('addressfield_phone')) {
++        $phone_elements = array(
++          'phone_number', 'phone_number_extension',
++          'mobile_number','fax_number',
++        );
++        foreach($billing_address as $field_name => $value) {
++          if (in_array($field_name,$phone_elements) && !empty($value)) {
++            $result['BILL_PHONE']  = $billing_address[$field_name];
++            break;
++          }
++        }
++      }
++    }
++  }
++  if (module_exists('commerce_shipping')) {
++    if ($wrapper->commerce_customer_shipping->__isset('commerce_customer_address')) {
++      $shipping_address = $wrapper->commerce_customer_shipping->commerce_customer_address->value();
++      $name_parts = explode(' ', $shipping_address['name_line']);
++      $shipping_address['first_name'] = array_shift($name_parts);
++      $shipping_address['last_name'] = implode(' ', $name_parts);
++      $result += array(
++        "DELIVERY_FNAME" => (isset($shipping_address['first_name'])) ? $shipping_address['first_name']: '',
++        "DELIVERY_LNAME" => (isset($shipping_address['last_name'])) ? $shipping_address['last_name']: '',
++        "DELIVERY_EMAIL" => $order->mail,
++        "DELIVERY_PHONE" => '',
++        "DELIVERY_ADDRESS" => (isset($shipping_address['thoroughfare'])) ? $shipping_address['thoroughfare']: '',
++        "DELIVERY_ADDRESS2" => (isset($shipping_address['premise'])) ? $shipping_address['premise']: '',
++        "DELIVERY_ZIPCODE" => (isset($shipping_address['postal_code'])) ? $shipping_address['postal_code']: '',
++        "DELIVERY_CITY" => (isset($shipping_address['locality'])) ? $shipping_address['locality']: '',
++        "DELIVERY_STATE" => (isset($shipping_address['administrative_area'])) ? $shipping_address['administrative_area']: '',
++        "DELIVERY_COUNTRYCODE" => (isset($shipping_address['country'])) ? $shipping_address['country']: '',
++      );
++      if (module_exists('addressfield_phone')) {
++        $phone_elements = array(
++          'phone_number', 'phone_number_extension',
++          'mobile_number','fax_number',
++        );
++        foreach($shipping_address as $field_name => $value) {
++          $result['DELIVERY_PHONE']  = (key_exists($field_name,$phone_elements) && !empty($value)) ? $billing_address[$field_name] : '';
++        }
++      }
++    }
++  }
++  return $result;
+ }
+ 
+-  
+-
+ 
+ function commerce_payu_build_redirect_form($form, &$form_state, $order, $settings) {
++  $billing = getBillDelivery($order); #commerce_payu_get_billing_info($order);
++  $option = array(
++    'merchant' => commerce_payu_get_settings('merchant'),
++    'secretkey' => commerce_payu_get_settings('secret_key'),
++    'debug' => commerce_payu_get_settings('debug_mode')
++  );
+ 
++  $lu = commerce_payu_get_settings('lu_url');
++  if ($lu != "") {
++    $option['luUrl'] = $lu;
++  }
+ 
++  $forSend = array(
++    'ORDER_REF' => $order->order_id, # Uniqe order
++    'PRICES_CURRENCY' => commerce_payu_get_settings('currency'), # Currency
++    'LANGUAGE' => commerce_payu_get_settings('language'),
++  );
++  $data = commerce_payu_get_orderdata($order);
++  $forSend = array_merge($forSend, $data, $billing);
+ 
+-$billing = getBillDelivery( $order ); #commerce_payu_get_billing_info($order);
+-$option  = array( 
+-                  'merchant' => commerce_payu_get_settings('merchant'), 
+-                  'secretkey' => commerce_payu_get_settings('secret_key'), 
+-                  'debug' => commerce_payu_get_settings('debug_mode') 
+-                  );
+-
+-$lu = commerce_payu_get_settings('lu_url');
+-if ( $lu != "" ) $option['luUrl'] = $lu;
+-
++  $pay = PayU::getInst()->setOptions($option)->setData($forSend)->LU();
+ 
+-$forSend = array (
+-          'ORDER_REF' => $order->order_id, # Uniqe order 
+-          'PRICES_CURRENCY' => commerce_payu_get_settings('currency'),  # Currency
+-          'LANGUAGE' => commerce_payu_get_settings('language'),
+-          );
+-      $data = commerce_payu_get_orderdata($order);
+-      $forSend = array_merge( $forSend, $data, $billing );
+ 
+-  $pay = PayU::getInst()->setOptions( $option )->setData( $forSend )->LU();
++//  echo $pay;
++  $form['#action'] = PayU::getInst()->luUrl;
++  $arr = $pay->getArr();
++  foreach ($arr  as $field => $value) {
++    $is_arr = (is_array($value)) ? '[]' : '';
++    $form[$field.$is_arr] = array(
++      '#type' => 'hidden',
++      '#value' => $value,
++    );
++  }
++  $form['submit'] = array(
++    '#type'  => 'submit',
++    '#value' => t('Pay'),
++  );
++// return $pay->getArr();
++  return $form;
+ 
+-  echo $pay;
+-  return $pay->getArr();
+ }
+ 
+ 
+-
+-function commerce_payu_get_orderdata($order)
+-{
+-  $data = array();
+-  $currency_code = $order->commerce_order_total[LANGUAGE_NONE][0]['currency_code'];  
++function commerce_payu_get_orderdata($order) {
++  $data = array('ORDER_SHIPPING' => 0);
++  $currency_code = $order->commerce_order_total[LANGUAGE_NONE][0]['currency_code'];
+   $amount = commerce_currency_amount_to_decimal($order->commerce_order_total[LANGUAGE_NONE][0]['amount'], $currency_code);
+ 
+   foreach ($order->commerce_line_items["und"] as $line) {
+- 
+-  $line_item = commerce_line_item_load($line['line_item_id']);
+-
+-
+-  if ( $line_item->type === "product" )
+-  {
+-    $product = commerce_product_load( $line_item->commerce_product["und"][0]["product_id"] );
+-    $price = &$line_item->commerce_unit_price["und"][0]['data']['components'];
+-
+-  
+-    $tax = round($price[1]['price']['data']['tax_rate']['rate'] * 100) + 1;
+ 
++    $line_item = commerce_line_item_load($line['line_item_id']);
++    if ($line_item->type === "product") {
++      $product = commerce_product_load($line_item->commerce_product["und"][0]["product_id"]);
++      $price = $line_item->commerce_unit_price["und"][0]['data']['components'];
++      $tax = 0;
++      //todo Oleg Natalushko need test
++      if (module_exists('commerce_tax')) {
++        $tax_componets = commerce_tax_components($price);
++        $tax = array_sum($tax_componets);
++        //$tax = round($price[1]['price']['data']['tax_rate']['rate'] * 100) + 1;
++      }
+ 
+-    $data['ORDER_PNAME'][] = $product->title_original;
+-    $data['ORDER_PCODE'][] = $line_item->line_item_id;
+-    $data['ORDER_PINFO'][] = "";
+-    $data['ORDER_PRICE'][] =  commerce_currency_amount_to_decimal( $line_item->commerce_unit_price["und"][0]['amount'], $currency_code);
+-    $data['ORDER_QTY'][] = (int)$line_item->quantity;
+-    $data['ORDER_VAT'][] = $tax; 
+-    $data['ORDER_PRICE_TYPE'][] = "GROSS";
+-  }
+-  elseif ($line_item->type === "shipping")
+-  {
+-    $data['ORDER_SHIPPING'] = commerce_currency_amount_to_decimal( $line_item->commerce_total["und"][0]["amount"], $currency_code);
+-  }
+-  
++      $data['ORDER_PNAME'][] = $product->title;
++      $data['ORDER_PCODE'][] = $line_item->line_item_id;
++      $data['ORDER_PINFO'][] = "";
++      $data['ORDER_PRICE'][] = commerce_currency_amount_to_decimal($line_item->commerce_unit_price["und"][0]['amount'], $currency_code);
++      $data['ORDER_QTY'][] = (int) $line_item->quantity;
++      $data['ORDER_VAT'][] = $tax;
++      $data['ORDER_PRICE_TYPE'][] = "GROSS";
++    }
++    elseif ($line_item->type === "shipping") {
++      $data['ORDER_SHIPPING'] = commerce_currency_amount_to_decimal($line_item->commerce_total["und"][0]["amount"], $currency_code);
++    }
+   }
+   return $data;
+ }
+ 
+ 
+-
+-
+ function commerce_payu_redirect_form($form, &$form_state, $order, $payment_method) {
+   return commerce_payu_build_redirect_form($form, $form_state, $order, $payment_method['settings']);
+ }
+ 
+ 
+-function commerce_payu_order_desc($order_id) {  
+-   $output = '';
+-   $text = commerce_payu_get_settings('description');  
+-   $output = (mb_strlen($text)) ? str_replace('%order', $order_id , $text) : t('Payment for order @order_number at @store', array('@order_number' => $order_id, '@store' => variable_get('site_name', '')));
+- return $output;
++function commerce_payu_order_desc($order_id) {
++  $output = '';
++  $text = commerce_payu_get_settings('description');
++  $output = (mb_strlen($text)) ? str_replace('%order', $order_id, $text) : t('Payment for order @order_number at @store', array(
++    '@order_number' => $order_id,
++    '@store' => variable_get('site_name', '')
++  ));
++  return $output;
+ }
+ 
+ function commerce_payu_get_settings($settings) {
+-    $output = '';
+-    $vars = variable_get('commerce_payu_settings', '');
+-    if (!empty($vars)) {
+-      foreach ($vars as $key=>$var) {
+-        if ($key == $settings) {
+-          $output = $vars[$key]['#default_value'];
+-          break;
+-        }  
++  $output = '';
++  $vars = variable_get('commerce_payu_settings', '');
++  if (!empty($vars)) {
++    foreach ($vars as $key => $var) {
++      if ($key == $settings) {
++        $output = $vars[$key]['#default_value'];
++        break;
+       }
+     }
++  }
+   return $output;
+ }
+ 
+ 
++function commerce_payu_result() {
+ 
++  $option = array(
++    'merchant' => commerce_payu_get_settings('merchant'),
++    'secretkey' => commerce_payu_get_settings('secret_key'),
++    'debug' => commerce_payu_get_settings('debug_mode')
++  );
+ 
+-function commerce_payu_result( ) {
+-
+-$option  = array( 
+-                  'merchant' => commerce_payu_get_settings('merchant'), 
+-                  'secretkey' => commerce_payu_get_settings('secret_key'), 
+-                  'debug' => commerce_payu_get_settings('debug_mode') 
+-                  );
+-
+-$payansewer = PayU::getInst()->setOptions( $option )->IPN();
+- 
++  $payansewer = PayU::getInst()->setOptions($option)->IPN();
+ 
+ 
+   $recived_order_id = $_POST['REFNOEXT'];
+   $order = commerce_order_load($recived_order_id);
+-  
++
+   $currency_code = $order->commerce_order_total[LANGUAGE_NONE][0]['currency_code'];
+-  $real_amount = abs(commerce_currency_amount_to_decimal($order->commerce_order_total[LANGUAGE_NONE][0]['amount'], $currency_code));      
+-  
++  $real_amount = abs(commerce_currency_amount_to_decimal($order->commerce_order_total[LANGUAGE_NONE][0]['amount'], $currency_code));
++
+   $recived_amount = abs($_POST['IPN_TOTALGENERAL']);
+ 
+   $log = (commerce_payu_get_settings('log')) ? '<pre>' . check_plain(print_r($_POST, TRUE)) . '</pre>' : '';
+ 
+ 
+   if ($real_amount == $recived_amount) {
+-      $transaction = commerce_payu_create_transaction($recived_order_id, commerce_payu_get_settings('status')); 
+-      
+-
+-      watchdog('commerce_payu', 'Order #@order paid successfully. !log', array('@order' => $_POST['REFNOEXT'], '!log' => $log), WATCHDOG_NOTICE);
+-      echo $payansewer;
+-
+-      
+-  } else {
+-      drupal_set_message(t('An error occurred while processing your payment: recieved and real order info do not match'), 'error');       
+-        watchdog('commerce_payu', 'Order #@order was not paid: recieved and real order info do not match. !log', array('@order' => $_POST['REFNOEXT'], '!log' => $log), WATCHDOG_NOTICE);           
+-      }
+-}
+-
++    $transaction = commerce_payu_create_transaction($recived_order_id, commerce_payu_get_settings('status'));
+ 
+ 
++    watchdog('commerce_payu', 'Order #@order paid successfully. !log', array(
++      '@order' => $_POST['REFNOEXT'],
++      '!log' => $log
++    ), WATCHDOG_NOTICE);
++    echo $payansewer;
+ 
+ 
++  }
++  else {
++    drupal_set_message(t('An error occurred while processing your payment: recieved and real order info do not match'), 'error');
++    watchdog('commerce_payu', 'Order #@order was not paid: recieved and real order info do not match. !log', array(
++      '@order' => $_POST['REFNOEXT'],
++      '!log' => $log
++    ), WATCHDOG_NOTICE);
++  }
++}
+ 
+ 
+ function commerce_payu_statuses() {
+-  $options = array();  
++  $options = array();
+   $statuses = commerce_payment_transaction_statuses();
+-  if(!empty($statuses)) {
+-    foreach($statuses as $status) { 
+-      $options[$status['status']] = $status['title']; 
++  if (!empty($statuses)) {
++    foreach ($statuses as $status) {
++      $options[$status['status']] = $status['title'];
+     }
+   }
+   return $options;
+ }
+ 
+ 
+-
+-
+ function commerce_payu_create_transaction($order_id, $status) {
+   $order = commerce_order_load($order_id);
+   $transaction = commerce_payment_transaction_new('commerce_payu', $order->order_id);
+@@ -253,5 +291,10 @@ function commerce_payu_create_transaction($order_id, $status) {
+   $transaction->status = $status;
+   $transaction->message = '';
+   $transaction->message_variables = array();
+-    commerce_payment_transaction_save($transaction);
+-}
+\ No newline at end of file
++  commerce_payment_transaction_save($transaction);
++}
++
++
++function commerce_payu_submit_form_submit($payment_method, $pane_form, $pane_values, $order, $charge) {
++dpm($payment_method);
++}
+diff --git a/commerce_payu/includes/class.payu.php b/commerce_payu/includes/class.payu.php
+old mode 100755
+new mode 100644
+index e5858a4..cdb7a61
+--- a/commerce_payu/includes/class.payu.php
++++ b/commerce_payu/includes/class.payu.php
+@@ -1,199 +1,236 @@
+ <?php
+-class PayU
+-{
+-	var $luUrl = "https://secure.payu.ua/order/lu.php", 
+-		$button = "<input type='submit'>",
+-		$debug = 0,
+-		$showinputs = "hidden";
+-
+-	private static $Inst = false, $merchant, $key;
+-
+-	private $data = array(), $dataArr = array(), $answer = ""; 
+-	private $LUcell = array( 'MERCHANT' => 1, 'ORDER_REF' => 0, 'ORDER_DATE' => 1, 'ORDER_PNAME' => 1, 'ORDER_PGROUP' => 0,
+-							'ORDER_PCODE' => 1, 'ORDER_PINFO' => 0, 'ORDER_PRICE' => 1, 'ORDER_QTY' => 1, 'ORDER_VAT' => 1, 
+-							'ORDER_SHIPPING' => 1, 'PRICES_CURRENCY' => 1, 'DISCOUNT' => 0, 'PAY_METHOD' => 0, 'ORDER_PRICE_TYPE' => 0,
+-							'HASH_STRING' => 0);
+-
+-	private $IPNcell = array( "IPN_PID", "IPN_PNAME", "IPN_DATE", "ORDERSTATUS" );
+-
+-	private function __construct(){}
+-	private function __clone(){}
+-	public function __toString()
+-	{ 
+-		return ( $this->answer === "" ) ? "<!-- Answer are not exists -->" : $this->answer;  
+-	}
+-	public static function getInst()
+-	{	
+-		if( self::$Inst === false ) self::$Inst = new PayU();
+-		return self::$Inst;
+-	}
++
++class PayU {
++  var $luUrl = "https://secure.payu.ua/order/lu.php",
++    $button = "<input type='submit'>",
++    $debug = 0,
++    $showinputs = "hidden";
++
++  private static $Inst = FALSE, $merchant, $key;
++
++  private $data = array(), $dataArr = array(), $answer = "";
++  private $LUcell = array(
++    'MERCHANT' => 1,
++    'ORDER_REF' => 0,
++    'ORDER_DATE' => 1,
++    'ORDER_PNAME' => 1,
++    'ORDER_PGROUP' => 0,
++    'ORDER_PCODE' => 1,
++    'ORDER_PINFO' => 0,
++    'ORDER_PRICE' => 1,
++    'ORDER_QTY' => 1,
++    'ORDER_VAT' => 1,
++    'ORDER_SHIPPING' => 1,
++    'PRICES_CURRENCY' => 1,
++    'DISCOUNT' => 0,
++    'PAY_METHOD' => 0,
++    'ORDER_PRICE_TYPE' => 0,
++    'HASH_STRING' => 0
++  );
++
++  private $IPNcell = array("IPN_PID", "IPN_PNAME", "IPN_DATE", "ORDERSTATUS");
++
++  private function __construct() {}
++
++  private function __clone() {}
++
++  public function __toString() {
++    return ($this->answer === "") ? "<!-- Answer are not exists -->" : $this->answer;
++  }
++
++  public static function getInst() {
++    if (self::$Inst === FALSE) {
++      self::$Inst = new PayU();
++    }
++    return self::$Inst;
++  }
+ 
+ #---------------------------------------------
+ # Add all options for PayU object. 
+ # Can change all public variables;
+ # $opt = array( merchant, secretkey, [ luUrl, debug, button ] );
+ #---------------------------------------------
+-	function setOptions( $opt = array() )
+-	{
+-		if ( !isset( $opt['merchant'] ) || !isset( $opt['secretkey'] )) die("No params");
+-		self::$merchant = $opt['merchant'];
+-		self::$key = $opt['secretkey'];
+-		unset( $opt['merchant'], $opt['secretkey'] );
+-		if ( count($opt) === 0 ) return $this;
+-		foreach ( $opt as $k => $v) $this->$k = $v;
+-		return $this;
+-	}
+-
+-	function setData( $array = null )
+-	{	
+-		if ($array === null ) die("No data");
+-		$this->dataArr = $array;
+-		return $this;
+-	}
++  function setOptions($opt = array()) {
++    if (!isset($opt['merchant']) || !isset($opt['secretkey'])) {
++      die("No params");
++    }
++    self::$merchant = $opt['merchant'];
++    self::$key = $opt['secretkey'];
++    unset($opt['merchant'], $opt['secretkey']);
++    if (count($opt) === 0) {
++      return $this;
++    }
++    foreach ($opt as $k => $v) {
++      $this->$k = $v;
++    }
++    return $this;
++  }
++
++  function setData($array = NULL) {
++    if ($array === NULL) {
++      die("No data");
++    }
++    $this->dataArr = $array;
++    return $this;
++  }
+ 
+ #--------------------------------------------------------
+ #	Generate HASH
+ #--------------------------------------------------------
+-	function Signature( $data = null ) 
+-	{		
+-		//echo "Key : ". self::$key;
+-		$str = "";
+-		foreach ( $data as $v ) $str .= $this->convData( $v );
+-		$this->basestr = $str;
+-		return hash_hmac("md5",$str, self::$key);
+-	}
+-	function getArr()
+-	{ return $this->dataArr; }
++  function Signature($data = NULL) {
++    //echo "Key : ". self::$key;
++    $str = "";
++    foreach ($data as $v) {
++      $str .= $this->convData($v);
++    }
++    $this->basestr = $str;
++    return hash_hmac("md5", $str, self::$key);
++  }
++
++  function getArr() {
++    return $this->dataArr;
++  }
+ 
+ #--------------------------------------------------------
+ # Outputs a string for hmac format.
+ # For a string like 'aa' it will return '2aa'.
+ #--------------------------------------------------------
+-	private function convString($string) 
+-	{	//echo mb_strlen($string, '8bit') . $string;
+-		return mb_strlen($string, '8bit') . $string;
+-	}
++  private function convString($string) { //echo mb_strlen($string, '8bit') . $string;
++    return mb_strlen($string, '8bit') . $string;
++  }
+ 
+ #--------------------------------------------------------
+ # The same as convString except that it receives
+ # an array of strings and returns the string from all values within the array.
+ #--------------------------------------------------------	
+-	private function convArray($array) 
+-	{
+-  		$return = '';
+-  		foreach ($array as $v) $return .= $this->convString( $v );
+-  		return $return;
+-	}
+-
+-	private function convData( $val )
+-	{
+-		return ( is_array( $val ) ) ? $this->convArray( $val ) : $this->convString( $val );
+-	}
++  private function convArray($array) {
++    $return = '';
++    foreach ($array as $v) {
++      $return .= $this->convString($v);
++    }
++    return $return;
++  }
++
++  private function convData($val) {
++    return (is_array($val)) ? $this->convArray($val) : $this->convString($val);
++  }
+ #----------------------------
+ 
+ #====================== LU GENERETE FORM =================================================
+ 
+-	public function LU()
+-	{	
+-		$arr = &$this->dataArr;
+-		$arr['MERCHANT'] = self::$merchant;
+-		if( !isset($arr['ORDER_DATE']) ) $arr['ORDER_DATE'] = date("Y-m-d H:i:s");
+-		$arr['TESTORDER'] = ( $this->debug == 1 ) ? "TRUE" : "FALSE";
+-		$arr['DEBUG'] = $this->debug;
+-		$arr['ORDER_HASH'] = $this->Signature( $this->checkArray( $arr ) );
+-		$arr['HASH_STRING'] = $this->basestr;
+-		$this->answer = $this->genereteForm( $arr );
+-		
+-		// echo  "\n\n\n\n\n<pre>",var_dump( $arr ),"</pre> \n\n ";
+-		return $this;
+-	}
++  public function LU() {
++    $arr = & $this->dataArr;
++    $arr['MERCHANT'] = self::$merchant;
++    if (!isset($arr['ORDER_DATE'])) {
++      $arr['ORDER_DATE'] = date("Y-m-d H:i:s");
++    }
++    $arr['TESTORDER'] = ($this->debug == 1) ? "TRUE" : "FALSE";
++    $arr['DEBUG'] = $this->debug;
++    $arr['ORDER_HASH'] = $this->Signature($this->checkArray($arr));
++    $arr['HASH_STRING'] = $this->basestr;
++    $this->answer = $this->genereteForm($arr);
++
++    // echo  "\n\n\n\n\n<pre>",var_dump( $arr ),"</pre> \n\n ";
++    return $this;
++  }
+ 
+ #-----------------------------
+ # Check array for correct data
+ #-----------------------------
+-	private function checkArray( $data )
+-	{
+-		$this->cells = array();
+-		$ret = array();
+-		foreach ( $this->LUcell as $k => $v ) 
+-		{ 	
+-			if ( isset($data[$k]) ) $ret[$k] = $data[$k];
+-			 elseif ( $v == 1 ) die("$k is not set");
+-		}
+-		return $ret;
+-	}
++  private function checkArray($data) {
++    $this->cells = array();
++    $ret = array();
++    foreach ($this->LUcell as $k => $v) {
++      if (isset($data[$k])) {
++        $ret[$k] = $data[$k];
++      }
++      elseif ($v == 1) {
++        die("$k is not set");
++      }
++    }
++    return $ret;
++  }
+ 
+ #-----------------------------
+ # Method which create a form
+ #-----------------------------
+-	private function genereteForm( $data )
+-	{	
+-		$form = '<form method="post" action="'.$this->luUrl.'" accept-charset="utf-8">';
+-		foreach ( $data as $k => $v ) $form .= $this->makeString( $k, $v );
+-		return $form . $this->button."</form>";
+-	}	
++  private function genereteForm($data) {
++    $form = '<form method="post" action="' . $this->luUrl . '" accept-charset="utf-8">';
++    foreach ($data as $k => $v) {
++      $form .= $this->makeString($k, $v);
++    }
++    return $form . $this->button . "</form>";
++  }
+ 
+ #-----------------------------
+ # Make inputs for form
+ #-----------------------------	
+-	private function makeString ( $name, $val )
+-	{
+-		$str = "";
+-		if ( !is_array( $val ) ) return '<input type="'.$this->showinputs.'" name="'.$name.'" value="'.htmlspecialchars($val).'">'."\n";
+-		foreach ($val as $v) $str .= $this->makeString( $name.'[]', $v );
+-		return $str;
+-	}
++  private function makeString($name, $val) {
++    $str = "";
++    if (!is_array($val)) {
++      return '<input type="' . $this->showinputs . '" name="' . $name . '" value="' . htmlspecialchars($val) . '">' . "\n";
++    }
++    foreach ($val as $v) {
++      $str .= $this->makeString($name . '[]', $v);
++    }
++    return $str;
++  }
+ 
+ #======================= END LU =====================================	
+ 
+ 
+ #======================= IPN READ ANSWER ============================
+ 
+-	public function IPN()
+-	{	
+-		$arr = &$this->dataArr;
+-		$arr = $_POST;
+-		foreach ( $this->IPNcell as $name ) if ( !isset( $arr[ $name ] ) ) die( "Incorrect data" );
+-
+-		$hash = $arr["HASH"];  
+-		unset( $arr["HASH"] );
+-		$sign = $this->Signature( $arr );
+-
+-		if ( $hash != $sign ) return $this;
+-		$datetime = date("YmdHis");
+-		$sign = $this->Signature(  array(
+-				   						"IPN_PID" => $arr[ "IPN_PID" ][0], 
+-				  						"IPN_PNAME" => $arr[ "IPN_PNAME" ][0], 
+-				   						"IPN_DATE" => $arr[ "IPN_DATE" ], 
+-				   						"DATE" => $datetime
+-										)
+-								);
+-
+-		$this->answer = "<!-- <EPAYMENT>$datetime|$sign</EPAYMENT> -->";
+-		return $this;
+-	}
++  public function IPN() {
++    $arr = & $this->dataArr;
++    $arr = $_POST;
++    foreach ($this->IPNcell as $name) {
++      if (!isset($arr[$name])) {
++        die("Incorrect data");
++      }
++    }
++
++    $hash = $arr["HASH"];
++    unset($arr["HASH"]);
++    $sign = $this->Signature($arr);
++
++    if ($hash != $sign) {
++      return $this;
++    }
++    $datetime = date("YmdHis");
++    $sign = $this->Signature(array(
++        "IPN_PID" => $arr["IPN_PID"][0],
++        "IPN_PNAME" => $arr["IPN_PNAME"][0],
++        "IPN_DATE" => $arr["IPN_DATE"],
++        "DATE" => $datetime
++      )
++    );
++
++    $this->answer = "<!-- <EPAYMENT>$datetime|$sign</EPAYMENT> -->";
++    return $this;
++  }
+ 
+ #======================= END IPN ============================
+ 
+ #======================= Check BACK_REF =====================
+-	function checkBackRef( $type = "http")
+-	{
+-		$path = $type.'://'.$_SERVER['SERVER_NAME'].$_SERVER['REQUEST_URI'];
+-		$tmp = explode("?", $path);
+-		$url = $tmp[0].'?';
+-		$params = array();
+-		foreach ($_GET as $k => $v)
+-		{
+-			if ( $k != "ctrl" ) $params[] = $k.'='.rawurlencode($v);
+-		}
+-		$url = $url.implode("&", $params);
+-		$arr = array($url);
+-		$sign = $this->Signature( $arr );
+-
+-		#echo "$sign === ".$_GET['ctrl'];
+-		$this->answer = ( $sign === $_GET['ctrl'] ) ? true : false;
+-		return $this->answer;
+-	}
++  function checkBackRef($type = "http") {
++    $path = $type . '://' . $_SERVER['SERVER_NAME'] . $_SERVER['REQUEST_URI'];
++    $tmp = explode("?", $path);
++    $url = $tmp[0] . '?';
++    $params = array();
++    foreach ($_GET as $k => $v) {
++      if ($k != "ctrl") {
++        $params[] = $k . '=' . rawurlencode($v);
++      }
++    }
++    $url = $url . implode("&", $params);
++    $arr = array($url);
++    $sign = $this->Signature($arr);
++
++    #echo "$sign === ".$_GET['ctrl'];
++    $this->answer = ($sign === $_GET['ctrl']) ? TRUE : FALSE;
++    return $this->answer;
++  }
+ 
+ #======================= END Check BACK_REF =================
+ 
